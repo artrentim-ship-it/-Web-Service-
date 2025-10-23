@@ -1,8 +1,521 @@
-from flask import Flask
+
+1 of 3,577
+(no subject)
+Inbox
+
+
+Antonio Rai Trentim
+Attachments
+4:53 PM (3 hours ago)
+to me
+
+ 
+
+ 
+
+ 
+
+
+
+Antonio Raí Trentim
+
+SSO - Saúde e Segurança Ocupacional
+
+São Martinho - Unidade Santa Cruz
+
+antonio.trentim@saomartinho.com.br
+
+www.saomartinho.com.br
+
++55 (16) 3393-9000
+
+ 
+
+...
+
+[Message clipped]  View entire message
+ 4 Attachments
+  •  Scanned by Gmail
+import os
+import json
+from flask import Flask, request, jsonify, render_template_string
+from flask_cors import CORS
+import google.generativeai as genai
+import logging
+
+# Configuração básica de logging
+logging.basicConfig(level=logging.INFO)
 
 app = Flask(__name__)
+# Configuração do CORS para permitir acesso externo
+CORS(app, resources={r"/*": {"origins": "*"}})
 
-@app.route('/')
-def home():
-    return "API Gemini está rodando!"
-``
+# --- Configuração do Gemini ---
+# A chave da API deve ser configurada na variável de ambiente do servidor
+api_key = os.environ.get("GOOGLE_GENAI_API_KEY")
+model = None
+
+def inicializar_modelo():
+    global model
+    if api_key:
+        try:
+            genai.configure(api_key=api_key)
+            
+            # --- MANUAL DE REGRAS (System Instruction) ---
+            system_instruction = """
+            **MANUAL DE REGRAS - ASSISTENTE CLÍNICO DR. ANTONIO RAÍ TRENTIM**
+            Você é o assistente do Dr. Antonio Raí Trentim, CRM 170197, Psiquiatra e Médico de Família.
+            Seu objetivo é auxiliar o Dr. Trentim, respondendo perguntas sobre raciocínio clínico, 
+            diagnósticos diferenciais e planos de tratamento.
+            Sua análise deve ser profunda e clínica.
+            Em farmacologia, considere o mundo real, mas alerte sobre doses e interações importantes.
+            Sempre foque na Medicina Centrada na Pessoa.
+            **Lembre-se: Você não diagnostica, não prescreve e não substitui o médico.** Sua função é ser um "segundo cérebro" para o Dr. Trentim, ajudando-o a pensar.
+            Responda de forma direta e informativa, como um assistente sênior.
+            """
+            
+            model = genai.GenerativeModel(
+                model_name="gemini-pro",
+                system_instruction=system_instruction
+            )
+            app.logger.info("Modelo Gemini (Chatbot) inicializado com sucesso.")
+        
+        except Exception as e:
+            app.logger.error(f"Erro ao inicializar Gemini: {e}")
+            model = None
+    else:
+        # Aviso se a API Key não estiver configurada
+        app.logger.warning("Variável de ambiente GOOGLE_GENAI_API_KEY não configurada.")
+        model = None
+
+inicializar_modelo()
+
+# --- Interface Web (Aparência e Funcionalidade do Site) ---
+HTML_TEMPLATE = """
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Assistente Clínico Dr. Antonio Raí Trentim</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            box-sizing: border-box;
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            margin: 0;
+            padding: 0;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100%;
+            color: #333;
+        }
+
+        html, body {
+            height: 100%;
+        }
+
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 20px;
+            min-height: 100%;
+            display: flex;
+            flex-direction: column;
+            box-sizing: border-box;
+        }
+
+        .header {
+            background: white;
+            padding: 30px;
+            border-radius: 16px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+            text-align: center;
+        }
+
+        .header h1 {
+            color: #2c3e50;
+            margin: 0 0 10px 0;
+            font-size: 2.2em;
+            font-weight: 700;
+        }
+
+        .header .subtitle {
+            color: #7f8c8d;
+            font-size: 1.1em;
+            margin: 0;
+        }
+
+        .crm-info {
+            background: #e8f4fd;
+            color: #2980b9;
+            padding: 8px 16px;
+            border-radius: 20px;
+            display: inline-block;
+            font-size: 0.9em;
+            font-weight: 500;
+            margin-top: 10px;
+        }
+
+        .chat-container {
+            background: white;
+            border-radius: 16px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.1);
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            max-height: 75vh; 
+        }
+
+        .chat-messages {
+            flex: 1;
+            padding: 20px;
+            overflow-y: auto;
+            background: #fafafa;
+        }
+
+        .message {
+            margin-bottom: 20px;
+            animation: fadeIn 0.3s ease-in;
+        }
+
+        .message.user {
+            text-align: right;
+        }
+
+        .message.assistant {
+            text-align: left;
+        }
+
+        .message-bubble {
+            display: inline-block;
+            max-width: 80%;
+            padding: 15px 20px;
+            border-radius: 20px;
+            font-size: 1em;
+            line-height: 1.5;
+            word-wrap: break-word;
+            white-space: pre-wrap; 
+        }
+
+        .message.user .message-bubble {
+            background: #3498db;
+            color: white;
+            border-bottom-right-radius: 5px;
+        }
+
+        .message.assistant .message-bubble {
+            background: white;
+            color: #2c3e50;
+            border: 1px solid #e0e0e0;
+            border-bottom-left-radius: 5px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+        }
+       .input-container {
+            padding: 20px;
+            background: white;
+            border-top: 1px solid #e0e0e0;
+        }
+
+        .input-form {
+            display: flex;
+            gap: 12px;
+            align-items: flex-end;
+        }
+
+        .input-wrapper {
+            flex: 1;
+            position: relative;
+        }
+        
+        .sr-only {
+            position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); border: 0;
+        }
+
+        #user-input {
+            width: 100%;
+            min-height: 50px;
+            max-height: 120px;
+            padding: 15px 20px;
+            border: 2px solid #e0e0e0;
+            border-radius: 25px;
+            font-size: 16px;
+            font-family: inherit;
+            resize: none;
+            outline: none;
+            transition: border-color 0.3s ease;
+            box-sizing: border-box;
+        }
+
+        #user-input:focus {
+            border-color: #3498db;
+        }
+
+        #user-input::placeholder {
+            color: #95a5a6;
+        }
+
+        .send-button {
+            background: #3498db;
+            color: white;
+            border: none;
+            border-radius: 50%;
+            width: 50px;
+            height: 50px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.3s ease;
+            font-size: 18px;
+        }
+
+        .send-button:hover:not(:disabled) {
+            background: #2980b9;
+            transform: scale(1.05);
+        }
+
+        .send-button:disabled {
+            background: #bdc3c7;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .loading {
+            display: none;
+            text-align: center;
+            padding: 10px 20px;
+            color: #7f8c8d;
+            background: #fafafa;
+        }
+
+        .loading.show {
+            display: block;
+        }
+
+        .spinner {
+            display: inline-block; width: 20px; height: 20px; border: 2px solid #e0e0e0; border-radius: 50%; border-top-color: #3498db; animation: spin 1s ease-in-out infinite; margin-right: 10px; vertical-align: middle;
+        }
+
+        .disclaimer {
+            background: #fff3cd;
+            border: 1px solid #ffeaa7;
+            color: #856404;
+            padding: 15px;
+            border-radius: 8px;
+            margin-top: 20px;
+            font-size: 0.9em;
+            text-align: center;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        @media (max-width: 768px) {
+            .container { padding: 10px; }
+            .header { padding: 20px; }
+            .header h1 { font-size: 1.8em; }
+            .message-bubble { max-width: 90%; }
+            .chat-container { max-height: 65vh; }
+        }
+    </style>
+</head>
+<body>
+    <main class="container">
+        <header class="header">
+            <h1>Assistente Clínico</h1>
+            <p class="subtitle">Dr. Antonio Raí Trentim</p>
+            <div class="crm-info">CRM 170197 • Psiquiatra e Médico de Família</div>
+        </header>
+
+        <div class="chat-container">
+            <div class="chat-messages" id="chat-messages">
+                <div class="message assistant">
+                    <div class="message-bubble">
+                        Olá! Sou o assistente clínico do Dr. Raí Trentim. Estou aqui para auxiliar com raciocínio clínico, diagnósticos diferenciais e planos de tratamento. Como posso ajudar hoje?
+                    </div>
+                </div>
+            </div>
+
+            <div class="loading" id="loading">
+                <div class="spinner"></div>
+                Processando sua pergunta...
+            </div>
+
+            <div class="input-container">
+                <form class="input-form" id="chat-form">
+                    <div class="input-wrapper">
+                        <label for="user-input" class="sr-only">Digite sua pergunta médica</label>
+                        <textarea 
+                            id="user-input" 
+                            placeholder="Digite sua pergunta sobre raciocínio clínico, diagnósticos ou tratamentos..."
+                            rows="1"
+                            required
+                        ></textarea>
+                    </div>
+                    <button type="submit" class="send-button" id="send-button" aria-label="Enviar mensagem">
+                        ➤
+                    </button>
+                </form>
+            </div>
+        </div>
+
+        <div class="disclaimer">
+            <strong>Aviso:</strong> Este assistente não diagnostica, não prescreve e não substitui o médico. 
+            É uma ferramenta de apoio ao raciocínio clínico do Dr. Trentim.
+        </div>
+    </main>
+
+    <script>
+        const chatForm = document.getElementById('chat-form');
+        const userInput = document.getElementById('user-input');
+        const sendButton = document.getElementById('send-button');
+        const chatMessages = document.getElementById('chat-messages');
+        const loading = document.getElementById('loading');
+
+        let conversationHistory = [];
+
+        function formatMessageForHistory(content, role) {
+            return {
+                role: role,
+                parts: [{ text: content }]
+            };
+        }
+
+        userInput.addEventListener('input', function() {
+            this.style.height = 'auto';
+            this.style.height = Math.min(this.scrollHeight, 120) + 'px';
+        });
+
+        userInput.addEventListener('keydown', function(e) {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                if (!sendButton.disabled) {
+                   chatForm.dispatchEvent(new Event('submit', { cancelable: true, bubbles: true }));
+                }
+            }
+        });
+
+        function addMessage(content, isUser = false) {
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `message ${isUser ? 'user' : 'assistant'}`;
+            
+            const bubbleDiv = document.createElement('div');
+            bubbleDiv.className = 'message-bubble';
+            bubbleDiv.textContent = content;
+            
+            messageDiv.appendChild(bubbleDiv);
+            chatMessages.appendChild(messageDiv);
+            
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+        }
+
+        function setLoading(show) {
+            loading.classList.toggle('show', show);
+            sendButton.disabled = show;
+            userInput.disabled = show; 
+            if (show) {
+                chatMessages.scrollTop = chatMessages.scrollHeight;
+            }
+        }
+
+        chatForm.addEventListener('submit', async function(e) {
+            e.preventDefault();
+            
+            const messageContent = userInput.value.trim();
+            if (!messageContent) return;
+
+            addMessage(messageContent, true);
+
+            const userMessage = formatMessageForHistory(messageContent, 'user');
+            conversationHistory.push(userMessage);
+            
+            userInput.value = '';
+            userInput.style.height = 'auto';
+            
+            setLoading(true);
+
+            try {
+                const response = await fetch('/perguntar', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ historico: conversationHistory }) 
+                });
+
+                if (!response.ok) {
+                    const errorData = await response.json().catch(() => ({}));
+                    throw new Error(errorData.resposta || 'Erro na comunicação com o servidor (Status: ' + response.status + ')');
+                }
+
+                const data = await response.json();
+                const assistantResponseContent = data.resposta || 'Desculpe, não consegui processar sua pergunta.';
+                
+                addMessage(assistantResponseContent, false);
+
+                const assistantMessage = formatMessageForHistory(assistantResponseContent, 'model');
+                conversationHistory.push(assistantMessage);
+                
+            } catch (error) {
+                console.error('Erro:', error);
+                addMessage(`Erro: ${error.message}. Tente novamente.`);
+                conversationHistory.pop(); 
+            } finally {
+                setLoading(false);
+                userInput.focus();
+            }
+        });
+
+        userInput.focus();
+    </script>
+</body>
+</html>
+"""
+
+# --- Rotas do Servidor ---
+
+@app.route("/")
+def index():
+    return render_template_string(HTML_TEMPLATE)
+
+@app.route("/perguntar", methods=["POST"])
+def perguntar():
+    if not model:
+        return jsonify({"resposta": "Erro de Configuração: Modelo não está disponível. Verifique a API Key."}), 503
+
+    dados = request.get_json()
+    historico = dados.get("historico", [])
+
+    if not historico:
+        return jsonify({"resposta": "Conversa vazia ou formato inválido (histórico não enviado)."}), 400
+
+    try:
+        if not isinstance(historico[-1], dict) or 'parts' not in historico[-1] or not historico[-1]['parts'] or 'text' not in historico[-1]['parts'][0]:
+             app.logger.error(f"Formato de mensagem inválido recebido: {historico[-1] if historico else 'Vazio'}")
+             return jsonify({"resposta": "Formato da mensagem inválido."}), 400
+
+        pergunta_atual = historico[-1]['parts'][0]['text']
+        historico_gemini = historico[:-1]
+
+        chat = model.start_chat(history=historico_gemini)
+        resposta = chat.send_message(pergunta_atual)
+        
+        texto_resposta = resposta.text if resposta and hasattr(resposta, 'text') and resposta.text else "Não foi possível gerar uma resposta."
+        return jsonify({"resposta": texto_resposta})
+        
+    except Exception as e:
+        app.logger.error(f"Erro ao gerar resposta do Gemini: {e}")
+        return jsonify({"resposta": f"Erro ao processar a pergunta: {str(e)}"}), 500
+
+# --- Inicialização ---
+if __name__ == "__main__":
+    print("Servidor Flask rodando. Acesse localmente em http://127.0.0.1:5000")
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
